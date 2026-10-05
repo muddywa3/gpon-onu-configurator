@@ -1,7 +1,7 @@
 import json
 import threading
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog
 
 from olt_command import execute_gpon_config, build_gpon_commands
 
@@ -84,6 +84,11 @@ class GPONConfigurator(tk.Tk):
 
         btns = ttk.Frame(self.form)
         btns.pack(fill="x", pady=(5, 12))
+        
+        # Save/Load buttons
+        ttk.Button(btns, text="Save Config", style="Secondary.TButton", command=self._save_config).pack(side="left", padx=5)
+        ttk.Button(btns, text="Load Config", style="Secondary.TButton", command=self._load_config).pack(side="left", padx=5)
+        
         ttk.Button(btns, text="Safisha", style="Secondary.TButton", command=self._reset).pack(side="right", padx=5)
         self.btn_submit = ttk.Button(btns, text="generate command", style="Primary.TButton", command=self._on_submit)
         self.btn_submit.pack(side="right", padx=5)
@@ -192,6 +197,54 @@ class GPONConfigurator(tk.Tk):
         self._log("", clear=True)
         self._log("Fomu imesafishwa.\n")
         self._set_status("Tayari")
+
+    def _save_config(self):
+        """Save current configuration to JSON file"""
+        try:
+            data = self._collect()
+            # Remove sensitive data from save
+            save_data = {k: v for k, v in data.items() if k not in ['olt_password', 'pppoe_password', 'wifi_shared_key']}
+            
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Save Configuration"
+            )
+            
+            if filename:
+                with open(filename, 'w') as f:
+                    json.dump(save_data, f, indent=2)
+                self._log(f"Configuration saved to: {filename}\n")
+                self._set_status("Configuration saved successfully", COLORS["success"])
+        except Exception as e:
+            self._log(f"Error saving configuration: {str(e)}\n")
+            self._set_status("Failed to save configuration", COLORS["error"])
+
+    def _load_config(self):
+        """Load configuration from JSON file"""
+        try:
+            filename = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Load Configuration"
+            )
+            
+            if filename:
+                with open(filename, 'r') as f:
+                    data = json.load(f)
+                
+                # Load data into form fields
+                for key, value in data.items():
+                    if key in self.vars:
+                        self.vars[key].set(str(value))
+                    elif key in self.checks:
+                        self.checks[key].set(bool(value))
+                
+                self._log(f"Configuration loaded from: {filename}\n")
+                self._log("Note: Passwords were not loaded for security reasons.\n")
+                self._set_status("Configuration loaded successfully", COLORS["success"])
+        except Exception as e:
+            self._log(f"Error loading configuration: {str(e)}\n")
+            self._set_status("Failed to load configuration", COLORS["error"])
 
     def _validate(self):
         required = [
