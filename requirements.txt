@@ -1,0 +1,17 @@
+# GPON ONU Configurator Requirements
+# Project dependencies for creating executable file
+
+# GUI Framework (built into Python, no need to install)
+# tkinter - comes with Python standard library
+
+# No external dependencies required
+# This project only uses Python standard library modules:
+# - tkinter (GUI)
+# - socket (networking) 
+# - re (regex)
+# - time (timing functions)
+# - threading (background tasks)
+# - json (data handling)
+
+# For building executable:
+pyinstaller>=6.0.0
