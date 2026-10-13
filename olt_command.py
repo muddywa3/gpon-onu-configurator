@@ -190,6 +190,39 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
         # 1. Connect and login
         client.login(data["olt_username"], data["olt_password"], log_callback)
 
+        # 1.4. Enter privileged EXEC mode (enable)
+        log_callback(f"[+] Entering privileged mode (enable)...\n")
+        enable_out = client.exec_cmd("enable", timeout=8.0)
+        log_callback(f"Enable response: {enable_out.strip()}\n")
+        
+        # Check if enable mode requires password
+        if "password" in enable_out.lower():
+            # Use dedicated enable password if provided, otherwise use OLT password
+            enable_password = data.get("olt_enable_password", "").strip()
+            if not enable_password:
+                enable_password = data["olt_password"]
+            
+            log_callback(f"[+] Enable mode requires password...\n")
+            enable_pwd_out = client.exec_cmd(enable_password, timeout=8.0)
+            log_callback(f"Enable password response: {enable_pwd_out.strip()}\n")
+            
+            # Check for authentication failure
+            if any(fail_word in enable_pwd_out.lower() for fail_word in ["bad", "incorrect", "invalid", "denied", "fail"]):
+                log_callback(f"❌ Enable password authentication failed!\n")
+                raise Exception("Enable mode authentication failed")
+        
+        # Verify we're in enable mode (prompt should end with #)
+        prompt_check = client.exec_cmd("", timeout=3.0)
+        log_callback(f"Current prompt after enable: {prompt_check.strip()}\n")
+        
+        if "#" not in prompt_check:
+            log_callback(f"⚠️ Warning: May not be in enable mode (no # prompt)\n")
+            log_callback(f"💡 Try setting Enable Password field in OLT Connection\n")
+        else:
+            log_callback(f"✅ Successfully entered enable mode\n")
+        
+        time.sleep(1.0)
+
         # 1.5. Enter global configuration mode
         log_callback(f"[+] Entering global configuration mode...\n")
         config_out = client.exec_cmd("configure terminal", timeout=8.0)

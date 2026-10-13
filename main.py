@@ -138,15 +138,16 @@ class GPONConfigurator(tk.Tk):
         self._field(g, "olt_ip", "OLT IP *", 0, 0, default="10.22.105.2")
         self._field(g, "olt_username", "Username *", 0, 1, default="admin")
         self._field(g, "olt_password", "Password *", 1, 0, show="•")
+        self._field(g, "olt_enable_password", "Enable Password", 1, 1, show="•", hint="Leave empty to use same as Password")
         
         # Test Mode checkbox  
         test_frame = ttk.Frame(g, style="Card.TFrame")
-        test_frame.grid(row=2, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        test_frame.grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 0))
         self._checkbox(test_frame, "test_mode", "Test Mode (Messagebox tu, haitaunganisha OLT ya kweli)", 0, 0, default=False)
         
         # OLT Discovery Mode checkbox
         discovery_frame = ttk.Frame(g, style="Card.TFrame") 
-        discovery_frame.grid(row=3, column=0, columnspan=4, sticky="w", pady=(5, 0))
+        discovery_frame.grid(row=4, column=0, columnspan=4, sticky="w", pady=(5, 0))
         self._checkbox(discovery_frame, "discovery_mode", "Discovery Mode (Explore OLT commands before execution)", 0, 0, default=False)
 
     def _section_position(self):
@@ -350,9 +351,21 @@ class GPONConfigurator(tk.Tk):
                 
                 # Run discovery commands
                 discovery_commands = [
+                    # Basic commands first
+                    "?", "help", "show ?",
+                    
+                    # Try enable mode
+                    "enable",
+                    
+                    # After enable, try these
                     "show version", "show system", "show device", "display version",
-                    "help", "?", "show ?", "gpon ?", "ont ?", "onu ?", 
-                    "interface ?", "configure ?", "config ?", "enable"
+                    "configure terminal", "config", "configure",
+                    
+                    # Interface commands  
+                    "interface ?", "gpon ?", "ont ?", "onu ?",
+                    
+                    # Vendor-specific
+                    "display version", "show equipment", "show card"
                 ]
                 
                 self._log("\n" + "=" * 50 + "\n")
@@ -360,24 +373,57 @@ class GPONConfigurator(tk.Tk):
                 self._log("=" * 50 + "\n\n")
                 
                 working_commands = []
+                enable_attempted = False
                 
                 for cmd in discovery_commands:
                     try:
                         self._log(f"Testing: {cmd}\n")
-                        response = client.exec_cmd(cmd, timeout=5.0)
                         
-                        if response and "unknown command" not in response.lower():
-                            working_commands.append(cmd)
-                            self._log(f"  ✅ SUCCESS\n")
+                        # Special handling for enable command
+                        if cmd == "enable" and not enable_attempted:
+                            response = client.exec_cmd(cmd, timeout=5.0)
+                            enable_attempted = True
                             
-                            # Show first few lines of response
-                            lines = response.split('\n')[:3]
-                            for line in lines:
-                                if line.strip():
-                                    self._log(f"    {line.strip()}\n")
-                            self._log("\n")
+                            if "password" in response.lower():
+                                # Use dedicated enable password if provided
+                                enable_password = data.get("olt_enable_password", "").strip()
+                                if not enable_password:
+                                    enable_password = data["olt_password"]
+                                
+                                self._log(f"  Enable requires password, trying enable password...\n")
+                                pwd_response = client.exec_cmd(enable_password, timeout=5.0)
+                                self._log(f"  Password response: {pwd_response.strip()}\n")
+                                
+                                # Check if we're now in enable mode
+                                prompt = client.exec_cmd("", timeout=3.0)
+                                if "#" in prompt:
+                                    self._log(f"  ✅ SUCCESS - Now in enable mode!\n")
+                                    working_commands.append("enable")
+                                else:
+                                    self._log(f"  ❌ Enable authentication failed\n")
+                            else:
+                                self._log(f"  Response: {response.strip()}\n")
+                                if "unknown command" not in response.lower():
+                                    working_commands.append("enable")
+                                    self._log(f"  ✅ SUCCESS\n")
+                                else:
+                                    self._log(f"  ❌ FAILED\n")
                         else:
-                            self._log(f"  ❌ FAILED\n\n")
+                            response = client.exec_cmd(cmd, timeout=5.0)
+                            
+                            if response and "unknown command" not in response.lower():
+                                working_commands.append(cmd)
+                                self._log(f"  ✅ SUCCESS\n")
+                                
+                                # Show first few lines of response
+                                lines = response.split('\n')[:3]
+                                for line in lines:
+                                    if line.strip():
+                                        self._log(f"    {line.strip()}\n")
+                            else:
+                                self._log(f"  ❌ FAILED\n")
+                        
+                        self._log("\n")
                             
                     except Exception as e:
                         self._log(f"  ⚠️ ERROR: {str(e)}\n\n")
