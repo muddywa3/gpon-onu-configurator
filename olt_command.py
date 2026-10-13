@@ -1,52 +1,56 @@
 import time
+import re
 from olt_telnet import OLTTelnetClient
+
+
+def is_valid_gpon_sn(sn):
+    """Validate GPON Serial Number format - supports multiple formats"""
+    if not sn:
+        return False, "Serial number is empty"
+    
+    # Normalize: uppercase, remove spaces/dashes
+    sn_clean = sn.upper().replace(" ", "").replace("-", "")
+    
+    # GPON SN formats supported:
+    # Format 1: 4 letters + 8 hex digits (VSOL1A2B3C4D, HWTC12345678)
+    # Format 2: GPON + numbers/letters (GPON006523777, GPON00663G65)
+    
+    # Pattern 1: Standard vendor format (4 letters + 8 hex)
+    pattern1 = r'^[A-Z]{4}[0-9A-F]{8}$'
+    
+    # Pattern 2: GPON prefix format (GPON + alphanumeric)
+    pattern2 = r'^GPON[0-9A-Z]{8,12}$'
+    
+    if re.match(pattern1, sn_clean):
+        return True, sn_clean
+    elif re.match(pattern2, sn_clean):
+        return True, sn_clean
+    else:
+        return False, f"Invalid GPON SN format. Expected: VSOL1A2B3C4D OR GPON006523777. Got: {sn_clean}"
+
+
+def normalize_gpon_sn(sn):
+    """Normalize GPON SN to standard format"""
+    if not sn:
+        return ""
+    return sn.upper().replace(" ", "").replace("-", "")
 
 
 def detect_olt_vendor(client, log_callback):
     """Detect OLT vendor and return appropriate command set"""
     log_callback("[+] Detecting OLT vendor and model...\n")
     
-    # Extended list of diagnostic commands for different vendors
-    diagnostic_commands = [
-        # Standard commands
-        "show version",
+    # V-SOL detection commands first (most reliable)
+    primary_commands = [
+        "show version",  # This works and shows "Device Model: V5600X2"
         "show system", 
         "show device",
-        "display version",
-        "display device",
-        "show system information",
-        "show chassis",
-        "show hardware",
-        
-        # Huawei specific
-        "display version",
-        "display device",
-        "display board 0",
-        
-        # ZTE specific  
-        "show card",
-        "show equipment",
-        "show system-information",
-        
-        # FiberHome specific
-        "show version brief",
-        "show equipment all",
-        
-        # DASAN/Other
-        "show system info",
-        "show shelf",
-        "show card all",
-        
-        # Generic fallbacks
-        "help",
-        "?",
-        "show ?",
-        "show"
     ]
     
     vendor_responses = []
     
-    for cmd in diagnostic_commands:
+    # Try primary commands first
+    for cmd in primary_commands:
         try:
             log_callback(f"    Trying: {cmd}\n")
             response = client.exec_cmd(cmd, timeout=5.0)
@@ -57,8 +61,14 @@ def detect_olt_vendor(client, log_callback):
                 
                 response_lower = response.lower()
                 
-                # Check for vendor indicators
-                if any(hw in response_lower for hw in ["huawei", "ma56", "ma58", "smartax"]):
+                # V-SOL Detection (PRIORITY - check first!)
+                if any(vsol in response_lower for vsol in ["v5600", "v-sol", "vsol"]) or \
+                   any(model in response for model in ["V5600X2", "V5600X7"]):
+                    log_callback("    🎯 Detected: V-SOL OLT\n")
+                    return "vsol"
+                
+                # Other vendors
+                elif any(hw in response_lower for hw in ["huawei", "ma56", "ma58", "smartax"]):
                     log_callback("    🎯 Detected: Huawei OLT\n")
                     return "huawei"
                 elif any(zte in response_lower for zte in ["zte", "zxan", "c300", "c320"]):
@@ -67,9 +77,6 @@ def detect_olt_vendor(client, log_callback):
                 elif any(fh in response_lower for fh in ["fiberhome", "an55", "an56"]):
                     log_callback("    🎯 Detected: FiberHome OLT\n")
                     return "fiberhome"
-                elif any(ds in response_lower for ds in ["dasan", "v-sol", "vsol", "zhone"]):
-                    log_callback("    🎯 Detected: DASAN/V-SOL OLT\n")
-                    return "dasan"
                 elif any(alc in response_lower for alc in ["alcatel", "nokia", "isam"]):
                     log_callback("    🎯 Detected: Nokia/Alcatel OLT\n")
                     return "nokia"
@@ -80,7 +87,7 @@ def detect_olt_vendor(client, log_callback):
             log_callback(f"    ⚠️ Error with {cmd}: {str(e)}\n")
             continue
     
-    # If we got responses but couldn't identify vendor, analyze content
+    # If we got responses but couldn't identify vendor, show what we found
     if vendor_responses:
         log_callback(f"    📋 Got {len(vendor_responses)} successful responses:\n")
         for cmd, resp in vendor_responses:
@@ -99,6 +106,13 @@ def get_vendor_commands(vendor, data):
     onu_desc = data.get("onu_description", "") or f"{data.get('pppoe_username', 'AUTO')}_AUTO"
     wifi_name = data.get("wifi_username", "") or "ONT_WiFi"
 
+    # Validate and normalize GPON SN first
+    is_valid, sn_result = is_valid_gpon_sn(data['gpon_sn'])
+    if not is_valid:
+        raise ValueError(f"GPON SN Validation Error: {sn_result}")
+    
+    gpon_sn = sn_result  # Use normalized SN
+
     # Build dynamic LAN bindings from checkboxes
     lan_bindings = " ".join([f"lan{i}" for i in range(1, 5) if data.get(f"lan{i}")])
 
@@ -110,17 +124,38 @@ def get_vendor_commands(vendor, data):
         ssid_list.append("ssid5")
     ssid_bindings = " ".join(ssid_list)
 
-    if vendor == "huawei":
+    if vendor == "vsol":
+        # V-SOL V5600X2/V5600X7 specific commands
+        # Proper workflow for V-SOL OLT systems
+        return [
+            # Step 1: Register ONU
+            f"onu add {onu_id} sn {gpon_sn}",
+            
+            # Step 2: Set ONU description  
+            f"onu {onu_id} name \"{onu_desc}\"",
+            
+            # Step 3: Configure TCONT and GEM port
+            f"onu {onu_id} tcont 1 profile default",
+            f"onu {onu_id} gemport 1 tcont 1",
+            
+            # Step 4: Configure VLAN and service
+            f"onu {onu_id} vlan {data['vlan_port']}",
+            f"onu {onu_id} service-port 1 vlan {data['vlan_port']} gemport 1",
+            
+            # Step 5: Enable ONU
+            f"onu {onu_id} enable",
+        ]
+    elif vendor == "huawei":
         # Huawei MA5608T/MA5683T style commands
         return [
-            f"ont add {data['gpon_sn']} {onu_id}",
+            f"ont add {gpon_sn} {onu_id}",
             f"ont port native-vlan {onu_id} eth 1 vlan {data['vlan_port']}",
             f"service-port {onu_id} vlan {data['vlan_port']} gpon 0/{data.get('slot', '0')}/{data.get('port', '1')} ont {onu_id} gemport 1 multi-service user-vlan {data['vlan_port']}"
         ]
     elif vendor == "zte":
         # ZTE C300/C320 style commands  
         return [
-            f"onu {onu_id} type ZTE-F460 sn {data['gpon_sn']}",
+            f"onu {onu_id} type ZTE-F460 sn {gpon_sn}",
             f"onu {onu_id} profile line ZTE-F460 remote ZTE-F460",
             f"pon-onu-mng gpon-onu_{data.get('slot', '0')}/{data.get('port', '1')}:{onu_id}",
             f"service HSI type internet gemport 1 vlan {data['vlan_port']}"
@@ -133,35 +168,18 @@ def get_vendor_commands(vendor, data):
             f"configure service vpls {data['vlan_port']} sap {data.get('slot', '0')}/{data.get('port', '1')}/{onu_id}:0 create"
         ]
     elif vendor == "unknown":
-        # Try multiple command formats for unknown OLT (V5600X7 detected)
-        slot = data.get('slot', '0')
-        port = data.get('port', '1')
-        
+        # Discovery-based commands for unknown V-SOL models
+        # Keep the working patterns from discovery but with proper SN validation
         return [
-            # Format 1: Interface-level direct commands (since we're already in interface mode)
-            f"ont add {onu_id} sn {data['gpon_sn']}",
-            f"ont {onu_id} desc {onu_desc}",
-            f"ont {onu_id} profile {onu_id}",
-            
-            # Format 2: Try without ont prefix
-            f"add ont {onu_id} sn {data['gpon_sn']}",
-            f"set ont {onu_id} desc {onu_desc}",
-            
-            # Format 3: Try create syntax
-            f"create ont {onu_id} sn {data['gpon_sn']} desc {onu_desc}",
-            
-            # Format 4: Try configure syntax  
-            f"configure ont {onu_id} sn {data['gpon_sn']}",
-            f"configure ont {onu_id} description {onu_desc}",
-            
-            # Format 5: Try set syntax
-            f"set ont {onu_id} serial-number {data['gpon_sn']}",
-            f"set ont {onu_id} name {onu_desc}",
+            # Use normalized SN with working command patterns
+            f"onu allow-list sn-auth {gpon_sn}",
+            f"onu auto-upgrade equipment-id {onu_id} enable",
+            f"onu auto-upgrade equipment-id {onu_id} version latest",
         ]
     else:
         # Generic/Original commands (keeping current format)
         commands = [
-            f"onu add {onu_id} profile default sn {data['gpon_sn']} us-rate 1g",
+            f"onu add {onu_id} profile default sn {gpon_sn} us-rate 1g",
             f"onu {onu_id} desc {onu_desc}",
             f"onu {onu_id} profile line name line_profile_1",
             f"onu {onu_id} profile srv name service_profile_1",
@@ -187,8 +205,40 @@ def get_vendor_commands(vendor, data):
             
         return commands
 def build_gpon_commands(data: dict) -> list[str]:
-    """Legacy function for backward compatibility - uses generic commands"""
-    return get_vendor_commands("generic", data)
+    """build commands specifically for v5600x7 based on discovery results"""
+    # v5600x7 discovery shows: onu allow-list, onu application
+    # use these instead of generic commands
+    
+    onu_id = data["onu_id"]
+    onu_desc = data.get("onu_description", "") or f"{data.get('pppoe_username', 'auto')}_auto"
+    wifi_name = data.get("wifi_username", "") or "ont_wifi"
+
+    # build dynamic lan bindings from checkboxes
+    lan_bindings = " ".join([f"lan{i}" for i in range(1, 5) if data.get(f"lan{i}")])
+
+    # build dynamic ssid bindings from checkboxes
+    ssid_list = []
+    if data.get("enable_ssid1"):
+        ssid_list.append("ssid1")
+    if data.get("enable_ssid5"):
+        ssid_list.append("ssid5")
+    ssid_bindings = " ".join(ssid_list)
+
+    # v5600x7 specific commands based on discovery
+    commands = [
+        # use discovered onu allow-list command
+        f"onu allow-list add {data['gpon_sn']} {onu_id}",
+        
+        # use discovered onu application command  
+        f"onu application {onu_id} internet",
+        f"onu application {onu_id} config pppoe username {data['pppoe_username']} password {data['pppoe_password']}",
+        f"onu application {onu_id} vlan {data['vlan_port']}",
+        
+        # wifi configuration using application
+        f"onu application {onu_id} wifi ssid {wifi_name} password {data['wifi_shared_key']}",
+    ]
+    
+    return commands
 
 
 def execute_gpon_config(data: dict, log_callback, status_callback, done_callback):
@@ -206,7 +256,7 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
         
         # Check if enable mode requires password
         if "password" in enable_out.lower():
-            # Use dedicated enable password if provided, otherwise use OLT password
+            # Use dedicated enable password if provided, otherwise use login password
             enable_password = data.get("olt_enable_password", "").strip()
             if not enable_password:
                 enable_password = data["olt_password"]
@@ -218,7 +268,13 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
             # Check for authentication failure
             if any(fail_word in enable_pwd_out.lower() for fail_word in ["bad", "incorrect", "invalid", "denied", "fail"]):
                 log_callback(f"❌ Enable password authentication failed!\n")
+                log_callback(f"💡 Try setting a different Enable Password in OLT Connection section\n")
                 raise Exception("Enable mode authentication failed")
+                
+        elif "#" in enable_out:
+            log_callback(f"✅ No enable password required - direct privileged access\n")
+        else:
+            log_callback(f"⚠️ Unexpected enable response: {enable_out.strip()}\n")
         
         # Verify we're in enable mode (prompt should end with #)
         prompt_check = client.exec_cmd("", timeout=3.0)
@@ -258,36 +314,92 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
         slot = data.get("slot", "0")
         port = data.get("port", "1")
         log_callback(f"[+] Navigating to interface gpon-olt_{slot}/{port}...\n")
+        #  log_callback(f"[+] Navigating to interface gpon-olt_{slot}/{port}...\n")
         
         # Try different interface command formats
         interface_formats = [
-            f"interface gpon-olt_{slot}/{port}",
-            f"interface gpon {slot}/{port}", 
-            f"interface gpon-olt {slot}/{port}",
-            f"gpon-olt_{slot}/{port}",
-            f"pon-channel gpon {slot}/{port}"
+            # f"interface gpon-olt_{slot}/{port}",
+              f"interface gpon {slot}/{port}", 
+            # f"interface gpon-olt {slot}/{port}",
+            # f"gpon-olt_{slot}/{port}",
+            # f"pon-channel gpon {slot}/{port}"
         ]
         
         interface_success = False
+        interface_response = ""
         for i, interface_cmd in enumerate(interface_formats):
             log_callback(f"    Trying format {i+1}: {interface_cmd}\n")
             out = client.exec_cmd(interface_cmd, timeout=8.0)
             log_callback(f"    Response: {out.strip()}\n")
             
-            if "unknown command" not in out.lower() and "invalid" not in out.lower():
+            # Check for specific errors that indicate wrong slot/port
+            if "isn't exist" in out.lower() or "not exist" in out.lower():
+                log_callback(f"    ❌ Slot/Port doesn't exist - need to find correct interface\n")
+                continue
+            elif "unknown command" not in out.lower() and "invalid" not in out.lower():
                 interface_success = True
+                interface_response = out.strip()
                 log_callback(f"    ✅ Interface command successful!\n")
                 break
+            else:
+                log_callback(f"    ❌ Format failed: {interface_cmd}\n")
         
+        # If all interface formats failed, try to discover available interfaces
         if not interface_success:
-            log_callback(f"    ❌ All interface formats failed. Continuing anyway...\n")
+            log_callback(f"[+] All interface formats failed. Discovering available interfaces...\n")
+            
+            # Try to find available gpon interfaces
+            discovery_cmds = [
+                "show interface gpon ?",
+                "show gpon ?", 
+                "show interface ?",
+                "interface gpon ?",
+                "interface ?",
+                "show running-config | include gpon",
+                "show gpon",
+                "show interface brief"
+            ]
+            
+            available_interfaces = []
+            for disc_cmd in discovery_cmds:
+                try:
+                    log_callback(f"    Discovering: {disc_cmd}\n")
+                    disc_out = client.exec_cmd(disc_cmd, timeout=5.0)
+                    
+                    if disc_out and "unknown command" not in disc_out.lower():
+                        log_callback(f"    ✅ Discovery success: {disc_cmd}\n")
+                        
+                        # Look for gpon interface patterns in response
+                        import re
+                        gpon_patterns = re.findall(r'gpon[-_]?\d+[/]\d+', disc_out.lower())
+                        if gpon_patterns:
+                            available_interfaces.extend(gpon_patterns)
+                            log_callback(f"    🎯 Found GPON interfaces: {gpon_patterns}\n")
+                        
+                        # Show first few lines of response
+                        lines = disc_out.split('\n')[:5]
+                        for line in lines:
+                            if line.strip() and 'gpon' in line.lower():
+                                log_callback(f"      {line.strip()}\n")
+                    else:
+                        log_callback(f"    ❌ Discovery failed: {disc_cmd}\n")
+                        
+                except Exception:
+                    continue
+            
+            if available_interfaces:
+                log_callback(f"    📋 Available GPON interfaces found: {set(available_interfaces)}\n")
+                log_callback(f"    💡 Try using one of these instead of gpon {slot}/{port}\n")
+            else:
+                log_callback(f"    ❌ No GPON interfaces discovered\n")
+                log_callback(f"    💡 Continuing anyway - commands might work in global config mode\n")
         
         time.sleep(1.0)  # Wait for interface mode to be active
 
         # 1.7. Detect OLT vendor and get appropriate commands
         vendor = detect_olt_vendor(client, log_callback)
         
-        # If vendor is unknown, try to discover available commands
+        # If unknown vendor, try to discover available commands
         if vendor == "unknown":
             log_callback("[+] Exploring available CLI commands...\n")
             
@@ -368,6 +480,35 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
                         continue
                 
                 log_callback(f"    📋 Interface commands working: {len(interface_working)}\n")
+                
+                # CRITICAL: Add syntax discovery for working commands
+                log_callback(f"[+] SYNTAX DISCOVERY: Testing exact command patterns...\n")
+                
+                # Since 'onu ?' works, let's test ONLY successful patterns from discovery
+                onu_syntax_tests = [
+                    "onu allow-list ?",  # We know this works - get full syntax
+                    "onu auto-upgrade ?", # We know this works - get full syntax
+                ]
+                
+                for syntax_cmd in onu_syntax_tests:
+                    try:
+                        log_callback(f"      Testing syntax: {syntax_cmd}\n")
+                        syntax_response = client.exec_cmd(syntax_cmd, timeout=5.0)
+                        
+                        if syntax_response and "unknown command" not in syntax_response.lower():
+                            log_callback(f"      ✅ SYNTAX WORKS: {syntax_cmd}\n")
+                            
+                            # Show the syntax help
+                            lines = syntax_response.split('\n')
+                            for line in lines:
+                                line = line.strip()
+                                if line and not line.startswith("KKY-OLT") and not line.startswith("DOD-OLT") and "%" not in line:
+                                    log_callback(f"        📝 {line}\n")
+                        else:
+                            log_callback(f"      ❌ Syntax failed: {syntax_cmd}\n")
+                    except Exception:
+                        continue
+                
             else:
                 log_callback(f"    ❌ No working commands found - OLT may need different approach\n")
         
@@ -379,17 +520,17 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
         log_callback(f"INANZA KUTUMA TELNET COMMANDS KWENYE OLT INTERFACE gpon-olt_{slot}/{port}:\n")
         log_callback("=" * 60 + "\n\n")
 
-        # If unknown vendor and few commands, do interactive discovery first
+        # If unknown vendor and few commands, do focused discovery  
         if vendor == "unknown" and len(commands) <= 10:
-            log_callback("[+] INTERACTIVE DISCOVERY: Testing interface commands...\n")
+            log_callback("[+] FOCUSED DISCOVERY: Testing ONLY working command patterns...\n")
             log_callback("=" * 40 + "\n")
             
-            # Test help commands in interface mode
-            help_commands = ["?", "help", "ont ?", "onu ?", "add ?", "create ?", "set ?"]
+            # Test ONLY commands we know work from discovery
+            working_help_commands = ["onu allow-list ?", "onu auto-upgrade ?"]
             
-            for help_cmd in help_commands:
+            for help_cmd in working_help_commands:
                 try:
-                    log_callback(f"Testing interface help: {help_cmd}\n")
+                    log_callback(f"Testing working syntax: {help_cmd}\n")
                     help_response = client.exec_cmd(help_cmd, timeout=5.0)
                     
                     if help_response and "unknown command" not in help_response.lower():
@@ -399,8 +540,8 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
                         lines = help_response.split('\n')
                         for line in lines[:10]:  # First 10 lines
                             line = line.strip()
-                            if line and not line.startswith("DOD-OLT") and "%" not in line:
-                                if any(keyword in line.lower() for keyword in ["ont", "onu", "add", "create", "set", "sn", "serial"]):
+                            if line and not line.startswith("KKY-OLT") and not line.startswith("DOD-OLT") and "%" not in line:
+                                if any(keyword in line.lower() for keyword in ["sn", "auth", "equipment", "list", "onu"]):
                                     log_callback(f"  💡 {line}\n")
                         log_callback("\n")
                     else:
@@ -410,7 +551,7 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
                     log_callback(f"⚠️ Error: {help_cmd} - {str(e)}\n")
             
             log_callback("=" * 40 + "\n")
-            log_callback("Now trying actual configuration commands...\n\n")
+            log_callback("Now trying ONLY discovered working commands...\n\n")
 
         total_commands = len(commands)
         for i, cmd in enumerate(commands, 1):
@@ -447,7 +588,14 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
                         client.exec_cmd("configure terminal", timeout=5.0)
                         client.exec_cmd(f"interface gpon-olt_{slot}/{port}", timeout=5.0)
                         
-            elif any(error_word in response_lower for error_word in ["error", "fail", "invalid", "denied"]):
+            elif "invalid sn" in response_lower:
+                log_callback(f"    ⚠️ SERIAL NUMBER FORMAT ERROR!\n")
+                log_callback(f"    💡 SN '{cmd.split()[-1]}' format is not accepted by OLT\n")
+                log_callback(f"    🔧 Try: UPPERCASE, add/remove GPON prefix, or different format\n")
+            elif "command incomplete" in response_lower:
+                log_callback(f"    ⚠️ COMMAND INCOMPLETE: Needs more parameters\n")
+                log_callback(f"    💡 The command syntax is correct but missing required parameters\n")
+            elif any(error_word in response_lower for error_word in ["error", "fail", "denied"]):
                 log_callback(f"    ⚠️ Warning: Possible error in response\n")
             else:
                 log_callback(f"    ✅ Command executed successfully\n")
@@ -470,15 +618,15 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
         time.sleep(0.5)
 
         log_callback("=" * 60 + "\n")
-        log_callback("✔ CONFIGURATION IMEKAMILIKA VIZURI!\n")
-        log_callback(f"Jumla ya commands: {total_commands}\n")
-        log_callback(f"Interface: gpon-olt_{slot}/{port}\n")
+        log_callback("✔ ONU CONFIGURATION COMPLETED!\n")
+        log_callback(f"Total commands executed: {total_commands}\n")
+        log_callback(f"Interface: gpon_{slot}/{port}\n")
         log_callback("=" * 60 + "\n")
-        status_callback("Configuration Imekamilika Vizuri!", "#38a169")
+        status_callback("Configuration completed successfully!", "#38a169")
 
     except Exception as e:
-        log_callback(f"\n❌ ERRORED/FAILED: {str(e)}\n")
-        status_callback("Kuna tatizo limetokea wakati wa Telnet!", "#e53e3e")
+        log_callback(f"\n❌ ERROR: {str(e)}\n")
+        status_callback("Configuration failed - please check connection!", "#e53e3e")
 
     finally:
         client.close()

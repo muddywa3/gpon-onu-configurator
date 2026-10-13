@@ -1,201 +1,183 @@
 # GPON ONU Configurator
 
-A Python-based GUI application for configuring GPON ONUs (Optical Network Units) via Telnet connection to OLT (Optical Line Terminal) devices.
+A Python GUI application for automated GPON ONU configuration on OLT systems via Telnet.
 
-![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
-![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)
-![License](https://img.shields.io/badge/License-MIT-green.svg)
+## Features
 
-## 🚀 Features
+- **Multi-Vendor Support**: V-SOL, Huawei, ZTE, Nokia/Alcatel OLT systems
+- **Automatic Vendor Detection**: Detects OLT type from `show version` output
+- **GPON SN Validation**: Supports multiple serial number formats (VSOL1A2B3C4D, GPON006523777)
+- **Auto Enable Password Discovery**: Tries common enable passwords automatically
+- **Test Mode**: Preview commands without connecting to OLT
+- **Discovery Mode**: Explore available OLT commands
+- **Configuration Save/Load**: Save and restore configuration settings
 
-- **User-friendly GUI** - Built with Tkinter for easy configuration
-- **Telnet Connection** - Direct communication with OLT devices
-- **Real-time Logging** - Live command execution feedback
-- **Test Mode** - Preview commands without executing them
-- **Standalone Executable** - No Python installation required for end users
-- **Comprehensive Configuration** - Complete ONU setup including:
-  - ONU positioning (Slot, Port, ID)
-  - PPPoE authentication
-  - VLAN configuration  
-  - WiFi settings (2.4GHz & 5GHz with automatic naming)
-    - 2.4GHz SSID: Uses the WiFi name as entered
-    - 5GHz SSID: Automatically adds "_5G" suffix
-    - Example: "home" → 2.4GHz: "home", 5GHz: "home_5G"
-  - LAN port bindings
+## Supported OLT Vendors
 
-## 📋 Requirements
+### V-SOL (V5600X2, V5600X7)
+- Auto-detects V-SOL OLT systems
+- Uses proper V-SOL workflow: register → configure → enable
+- Commands: `onu add`, `onu tcont`, `onu gemport`, `onu vlan`
 
-### For Running Source Code
-- Python 3.12 or higher
-- tkinter (included with Python)
-- Standard library modules: `socket`, `re`, `time`, `threading`, `json`
+### Huawei (MA5608T, MA5683T)
+- Standard Huawei ONT workflow
+- Commands: `ont add`, `ont port native-vlan`, `service-port`
 
-### For Building Executable
-- PyInstaller 6.0+
+### ZTE (C300, C320)
+- ZTE-specific command syntax
+- Commands: `onu type`, `pon-onu-mng`, `service HSI`
 
-## 🛠️ Installation
+## Requirements
 
-### Option 1: Download Executable (Recommended)
-1. Download `GPON-ONU-Configurator.exe` from the releases page
-2. Double-click to run - no installation needed!
+- Python 3.7+
+- tkinter (usually included with Python)
+- Network access to OLT via Telnet (port 23)
 
-### Option 2: Run from Source
-```bash
-# Clone the repository
-git clone https://github.com/muddywa3/gpon-onu-configurator.git
-cd gpon-onu-configurator
+## Installation
 
-# Run the application
-python main.py
-```
+1. **Download/Clone** the application files
+2. **Install Python** (if not already installed)
+3. **Run the application**:
+   ```bash
+   python main.py
+   ```
 
-### Option 3: Build Your Own Executable
-```bash
-# Install PyInstaller
-pip install pyinstaller
+## Usage
 
-# Build executable
-pyinstaller --onefile --windowed --name "GPON-ONU-Configurator" main.py
-```
+### Basic Configuration
 
-## 💻 Usage
+1. **OLT Connection**:
+   - IP Address: Your OLT IP (e.g., 192.168.1.100)
+   - Username: OLT username (usually `admin`)
+   - Password: OLT login password
+   - Enable Password: Leave empty to auto-detect
 
-### Basic Setup
-1. **Launch** the application
-2. **Configure OLT Connection**:
-   - Enter OLT IP address
-   - Provide username and password
-   - Optional: Enable "Test Mode" to preview commands
+2. **ONU Position**:
+   - Slot: GPON slot number (0-15)
+   - Port: GPON port number (1-16)  
+   - ONU ID: Unique ONU identifier (1-128)
+   - GPON S/N: Valid GPON serial number
 
-3. **Set ONU Details**:
-   - Slot and Port numbers
-   - ONU ID
-   - GPON Serial Number
-   - Description (optional)
+3. **Service Configuration**:
+   - PPPoE Username/Password: Customer credentials
+   - VLAN Port: Service VLAN ID
+   - WiFi Settings: SSID name and password
 
-4. **Configure Services**:
-   - PPPoE username and password
-   - VLAN settings
-   - WiFi credentials and SSID preferences
-   - LAN port bindings
+### GPON Serial Number Formats
 
-5. **Execute Configuration**:
-   - Click "Generate Command"
-   - Monitor real-time execution in the log area
+The application supports multiple GPON SN formats:
+
+- **Vendor Format**: `VSOL1A2B3C4D` (4 letters + 8 hex digits)
+- **GPON Format**: `GPON006523777` (GPON prefix + alphanumeric)
+
+Examples of **valid** serial numbers:
+- `VSOL12345678`
+- `HWTC1A2B3C4D` 
+- `GPON00663G65`
+- `GPON382956573`
 
 ### Test Mode
-Enable "Test Mode" to:
-- Preview generated commands
-- Verify configuration without connecting to OLT
-- Debug command generation logic
 
-## 🏗️ Architecture
+Use **Test Mode** to preview generated commands without connecting to the OLT:
 
-The application consists of three main modules:
+1. Check "Test Mode" checkbox
+2. Fill in configuration fields
+3. Click "Start Configuration"
+4. Commands will be displayed in a message box
 
-- **`main.py`** - GUI interface and user interaction
-- **`olt_telnet.py`** - Telnet client for OLT communication
-- **`olt_command.py`** - Command generation and execution logic
+### Discovery Mode
 
-## 📊 Command Flow
+Use **Discovery Mode** to explore available commands on unknown OLT systems:
 
+1. Check "Discovery Mode" checkbox  
+2. Enter OLT connection details
+3. Click "Start Configuration"
+4. System will test various commands and show results
+
+## Configuration Files
+
+### Save/Load Settings
+
+- **Save Config**: Export current form data to JSON file (passwords excluded for security)
+- **Load Config**: Import previously saved configuration
+
+### Example Configuration
+```json
+{
+  "olt_ip": "192.168.1.100",
+  "olt_username": "admin", 
+  "slot": "2",
+  "port": "16",
+  "onu_id": "5",
+  "gpon_sn": "VSOL12345678",
+  "pppoe_username": "customer@isp.com",
+  "vlan_port": "150",
+  "wifi_username": "CustomerWiFi"
+}
 ```
-User Input → Command Generation → Telnet Connection → OLT Execution → Real-time Feedback
-```
 
-1. **Input Validation** - Verify all required fields
-2. **Command Building** - Generate OLT-specific CLI commands
-3. **Telnet Session** - Establish secure connection to OLT
-4. **Sequential Execution** - Execute commands with proper timing
-5. **Response Monitoring** - Parse and display OLT responses
+## Troubleshooting
 
-## 🔧 Configuration Examples
+### Common Issues
 
-### Typical ONU Configuration
-- **Slot**: 0, **Port**: 1, **ONU ID**: 1
-- **GPON S/N**: GPON00663G65
-- **PPPoE**: username@provider / password
-- **VLAN**: Tag mode, Port 150
-- **WiFi**: 2.4GHz + 5GHz enabled
-- **LAN**: All ports (1-4) bound
+**"Enable password authentication failed"**
+- Try common passwords: `admin`, `enable`, `password`
+- Leave Enable Password field empty for auto-detection
+- Check if OLT requires privileged access
 
-## 🚨 Troubleshooting
+**"Unknown command" errors**
+- Verify you're connected to the correct OLT interface  
+- Use Discovery Mode to explore available commands
+- Check if OLT vendor is properly detected
 
-### Application Won't Start
-- Run as Administrator
-- Check Windows Defender/Antivirus settings
-- Verify .NET Framework is installed
+**"Invalid GPON SN" errors**
+- Verify SN format: 4 letters + 8 hex OR GPON + alphanumeric
+- Examples: `VSOL1A2B3C4D`, `GPON006523777`
+- Remove spaces and special characters
 
-### Connection Issues
-- Verify OLT IP address and credentials
+**Connection timeout**
+- Verify OLT IP address and Telnet port (23)
 - Check network connectivity
-- Use Test Mode to debug command generation
+- Ensure OLT allows Telnet connections
 
-### Configuration Errors
-- Review log output for specific error messages
-- Verify ONU serial number format
-- Check VLAN ID ranges (1-4094)
+### Enable Password Auto-Detection
 
-## 🧪 Testing
+The system automatically tries these passwords in order:
+1. User-provided enable password
+2. Same as login password  
+3. `admin`
+4. `enable`
+5. `password`
+6. `vsol` 
+7. Empty password
 
-The application includes built-in testing features:
-- **Test Mode** - Command preview without execution
-- **Real-time Logging** - Detailed execution feedback
-- **Error Detection** - Automatic error response parsing
-
-## 📁 Project Structure
+## File Structure
 
 ```
 gpon-onu-configurator/
-├── main.py                     # Main GUI application
-├── olt_telnet.py              # Telnet client module
-├── olt_command.py             # Command generation module
-├── requirements.txt           # Python dependencies
-├── README.md                  # Project documentation
-├── README_EXE.md             # Executable usage guide
-├── .gitignore                # Git ignore rules
-└── dist/                     # Built executables
-    └── GPON-ONU-Configurator.exe
+├── main.py              # GUI application
+├── olt_command.py       # OLT command generation and execution
+├── olt_telnet.py        # Telnet client implementation
+├── README.md            # This documentation
+└── requirements.txt     # Python dependencies
 ```
 
-## 🤝 Contributing
+## Security Notes
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- **Passwords**: Not saved in configuration files for security
+- **Telnet**: Uses unencrypted Telnet protocol (standard for OLT management)
+- **Credentials**: Only stored in memory during execution
 
-## 📝 License
+## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is provided as-is for educational and professional use.
 
-## 🛡️ Security
+## Contributing
 
-- **No sensitive data storage** - Credentials are used only during session
-- **Local execution** - No data sent to external servers
-- **Open source** - Code is available for security review
-
-## 📞 Support
-
-- **Issues**: Report bugs or request features via GitHub Issues
-- **Documentation**: Check `README_EXE.md` for executable usage
-- **Email**: muddywa3@gmail.com
-
-## 🏷️ Version History
-
-- **v1.0** - Initial release with core functionality
-  - GUI-based ONU configuration
-  - Telnet OLT communication
-  - Real-time command execution
-  - Standalone executable build
-
-## 🙏 Acknowledgments
-
-- Built with Python and Tkinter
-- Packaged with PyInstaller
-- Designed for network administrators and field technicians
+Contributions welcome! Please test thoroughly with your specific OLT models before submitting changes.
 
 ---
 
-**⭐ Star this repository if it helps you configure ONUs more efficiently!**
+**Version**: 2.0  
+**Author**: Network Automation Tools  
+**Last Updated**: 2024

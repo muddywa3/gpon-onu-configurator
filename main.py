@@ -59,7 +59,7 @@ class GPONConfigurator(tk.Tk):
         txt = tk.Frame(header, bg=COLORS["header"])
         txt.pack(side="left", pady=12)
         tk.Label(txt, text="GPON ONU Configurator", bg=COLORS["header"], fg="white", font=("Segoe UI", 15, "bold")).pack(anchor="w")
-        """tk.Label(txt, text="Automation ya ku-config ONU kwenye OLT", bg=COLORS["header"], fg="#cbd5e0", font=("Segoe UI", 9)).pack(anchor="w")"""
+        tk.Label(txt, text="Automated ONU Configuration for OLT Systems", bg=COLORS["header"], fg="#cbd5e0", font=("Segoe UI", 9)).pack(anchor="w")
 
         body = ttk.Frame(self)
         body.pack(fill="both", expand=True)
@@ -89,22 +89,22 @@ class GPONConfigurator(tk.Tk):
         ttk.Button(btns, text="Save Config", style="Secondary.TButton", command=self._save_config).pack(side="left", padx=5)
         ttk.Button(btns, text="Load Config", style="Secondary.TButton", command=self._load_config).pack(side="left", padx=5)
         
-        ttk.Button(btns, text="Safisha", style="Secondary.TButton", command=self._reset).pack(side="right", padx=5)
-        self.btn_submit = ttk.Button(btns, text="generate command", style="Primary.TButton", command=self._on_submit)
+        ttk.Button(btns, text="Clear Form", style="Secondary.TButton", command=self._reset).pack(side="right", padx=5)
+        self.btn_submit = ttk.Button(btns, text="Start Configuration", style="Primary.TButton", command=self._on_submit)
         self.btn_submit.pack(side="right", padx=5)
 
         log_card = ttk.Frame(self.form, style="Card.TFrame", padding=12)
         log_card.pack(fill="both", expand=True, pady=(0, 15))
-        ttk.Label(log_card, text="● Execution Log / Telnet Streams", style="CardTitle.TLabel").pack(anchor="w", pady=(0, 8))
+        ttk.Label(log_card, text="● Execution Log / Telnet Output", style="CardTitle.TLabel").pack(anchor="w", pady=(0, 8))
 
         self.log = scrolledtext.ScrolledText(
             log_card, height=11, bg=COLORS["log_bg"], fg=COLORS["log_fg"],
             font=("Consolas", 9), insertbackground="white", wrap="word", borderwidth=0, padx=10, pady=8
         )
         self.log.pack(fill="both", expand=True)
-        self._log("Tayari. Jaza fields kisha bonyeza 'Anza Configuration'.\n")
+        self._log("Ready. Fill in the fields and click 'Start Configuration'.\n")
 
-        self.status = tk.Label(self, text=" Tayari", anchor="w", bg="#e2e8f0", fg=COLORS["text"], font=("Segoe UI", 9), padx=10, pady=4)
+        self.status = tk.Label(self, text=" Ready", anchor="w", bg="#e2e8f0", fg=COLORS["text"], font=("Segoe UI", 9), padx=10, pady=4)
         self.status.pack(fill="x", side="bottom")
 
     def _card(self, title):
@@ -143,19 +143,19 @@ class GPONConfigurator(tk.Tk):
         # Test Mode checkbox  
         test_frame = ttk.Frame(g, style="Card.TFrame")
         test_frame.grid(row=3, column=0, columnspan=4, sticky="w", pady=(10, 0))
-        self._checkbox(test_frame, "test_mode", "Test Mode (Messagebox tu, haitaunganisha OLT ya kweli)", 0, 0, default=False)
+        self._checkbox(test_frame, "test_mode", "Test Mode (Show commands without connecting to OLT)", 0, 0, default=False)
         
         # OLT Discovery Mode checkbox
         discovery_frame = ttk.Frame(g, style="Card.TFrame") 
         discovery_frame.grid(row=4, column=0, columnspan=4, sticky="w", pady=(5, 0))
-        self._checkbox(discovery_frame, "discovery_mode", "Discovery Mode (Explore OLT commands before execution)", 0, 0, default=False)
+        self._checkbox(discovery_frame, "discovery_mode", "Discovery Mode (Explore OLT commands)", 0, 0, default=False)
 
     def _section_position(self):
         g = self._card("ONU Position")
         self._field(g, "slot", "Slot *", 0, 0, width=10, default="0")
         self._field(g, "port", "Port *", 0, 1, width=10, default="1")
         self._field(g, "onu_id", "ONU ID *", 0, 2, width=10, default="1")
-        self._field(g, "gpon_sn", "GPON S/N *", 1, 0, width=30, hint="Mfano: GPON00663G65")
+        self._field(g, "gpon_sn", "GPON S/N *", 1, 0, width=30, hint="Format: VSOL1A2B3C4D or GPON006523777")
         self._field(g, "onu_description", "ONU Description", 1, 1, width=40)
 
     def _section_pppoe(self):
@@ -200,9 +200,8 @@ class GPONConfigurator(tk.Tk):
             v.set("")
         for c in self.checks.values():
             c.set(False)
-        self._log("", clear=True)
-        self._log("Fomu imesafishwa.\n")
-        self._set_status("Tayari")
+        self._log("Form cleared.\n")
+        self._set_status("Ready")
 
     def _save_config(self):
         """Save current configuration to JSON file"""
@@ -255,14 +254,14 @@ class GPONConfigurator(tk.Tk):
     def _validate(self):
         required = [
             ("slot", "Slot"), ("port", "Port"), ("onu_id", "ONU ID"), ("gpon_sn", "GPON S/N"),
-            ("pppoe_username", "Username"), ("pppoe_password", "Password"),
-            ("vlan_port", "VLAN Port"), ("wifi_shared_key", "WiFi Shared Key")
+            ("pppoe_username", "PPPoE Username"), ("pppoe_password", "PPPoE Password"),
+            ("vlan_port", "VLAN Port"), ("wifi_shared_key", "WiFi Password")
         ]
         
         # If not in test mode, OLT connection fields are required
         if not self.checks.get("test_mode", tk.BooleanVar()).get():
             required = [
-                ("olt_ip", "OLT IP"), ("olt_username", "Username"), ("olt_password", "Password")
+                ("olt_ip", "OLT IP"), ("olt_username", "OLT Username"), ("olt_password", "OLT Password")
             ] + required
         
         missing = [name for key, name in required if not self.vars[key].get().strip()]
@@ -270,15 +269,24 @@ class GPONConfigurator(tk.Tk):
             return missing
 
         if len(self.vars["wifi_shared_key"].get()) < 8:
-            return ["WiFi Shared Key (lazima iwe herufi 8 au zaidi)"]
+            return ["WiFi Password (must be at least 8 characters)"]
 
         gpon_sn = self.vars["gpon_sn"].get().strip()
-        if not (8 <= len(gpon_sn) <= 20):
-            return ["GPON S/N (lazima iwe herufi 8 hadi 20)"]
         
-        # Check if GPON S/N contains valid characters (alphanumeric)
-        if not all(c.isalnum() for c in gpon_sn):
-            return ["GPON S/N (lazima iwe herufi na namba tu, hakuna special characters)"]
+        # Import validation from olt_command module
+        try:
+            from olt_command import is_valid_gpon_sn
+            is_valid, error_msg = is_valid_gpon_sn(gpon_sn)
+            if not is_valid:
+                return [f"GPON S/N: {error_msg}"]
+        except ImportError:
+            # Fallback validation if import fails
+            if not (8 <= len(gpon_sn) <= 20):
+                return ["GPON S/N (lazima iwe herufi 8 hadi 20)"]
+            
+            # Check if GPON S/N contains valid characters (alphanumeric)
+            if not all(c.isalnum() for c in gpon_sn):
+                return ["GPON S/N (lazima iwe herufi na namba tu, hakuna special characters)"]
 
         try:
             v = int(self.vars["vlan_port"].get())
@@ -444,37 +452,38 @@ class GPONConfigurator(tk.Tk):
                 self.after(0, lambda: self.btn_submit.config(state="normal"))
         
         threading.Thread(target=discovery_task, daemon=True).start()
-        """Show the generated commands in a messagebox for test mode"""
+    def _show_test_mode_result(self, data):
+        """show the generated commands in a messagebox for test mode"""
         try:
             commands = build_gpon_commands(data)
             
-            # Join all commands with newlines
+            # join all commands with newlines
             command_text = "\n".join(commands)
             
-            # Show in messagebox
+            # show in messagebox
             messagebox.showinfo(
-                "Test Mode - Generated Commands",
-                f"Haya ndiyo macommands yanayotakiwa kwenye OLT:\n\n{command_text}",
+                "test mode - generated commands",
+                f"haya ndiyo macommands yanayotakiwa kwenye olt:\n\n{command_text}",
                 parent=self
             )
             
-            # Also log to the text area
-            self._log("TEST MODE - Commands zilizotayarishwa:\n", clear=True)
+            # also log to the text area
+            self._log("test mode - commands zilizotayarishwa:\n", clear=True)
             self._log("=" * 60 + "\n")
             for cmd in commands:
                 self._log(f"> {cmd}\n")
             self._log("=" * 60 + "\n")
-            self._log("✔ Test completed! Commands zimeonyeshwa kwenye messagebox.\n")
-            self._set_status("Test Mode - Commands zimeonyeshwa", COLORS["success"])
+            self._log("✔ test completed! commands zimeonyeshwa kwenye messagebox.\n")
+            self._set_status("test mode - commands zimeonyeshwa", COLORS["success"])
             
         except Exception as e:
             messagebox.showerror(
-                "Test Mode Error", 
-                f"Kuna tatizo limetokea wakati wa kutengeneza commands:\n{str(e)}", 
+                "test mode error", 
+                f"kuna tatizo limetokea wakati wa kutengeneza commands:\n{str(e)}", 
                 parent=self
             )
-            self._log(f"❌ Test Mode Error: {str(e)}\n")
-            self._set_status("Test Mode - Kuna tatizo limetokea", COLORS["error"])
+            self._log(f"❌ test mode error: {str(e)}\n")
+            self._set_status("test mode - kuna tatizo limetokea", COLORS["error"])
 
 
 if __name__ == "__main__":
