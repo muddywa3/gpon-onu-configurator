@@ -96,8 +96,8 @@ def detect_olt_vendor(client, log_callback):
 def get_vendor_commands(vendor, data):
     """Get vendor-specific command set"""
     onu_id = data["onu_id"]
-    onu_desc = data["onu_description"] if data["onu_description"] else f"{data['pppoe_username']}_AUTO"
-    wifi_name = data["wifi_username"] if data["wifi_username"] else "ONT_WiFi"
+    onu_desc = data.get("onu_description", "") or f"{data.get('pppoe_username', 'AUTO')}_AUTO"
+    wifi_name = data.get("wifi_username", "") or "ONT_WiFi"
 
     # Build dynamic LAN bindings from checkboxes
     lan_bindings = " ".join([f"lan{i}" for i in range(1, 5) if data.get(f"lan{i}")])
@@ -133,21 +133,30 @@ def get_vendor_commands(vendor, data):
             f"configure service vpls {data['vlan_port']} sap {data.get('slot', '0')}/{data.get('port', '1')}/{onu_id}:0 create"
         ]
     elif vendor == "unknown":
-        # Try multiple command formats for unknown OLT
+        # Try multiple command formats for unknown OLT (V5600X7 detected)
+        slot = data.get('slot', '0')
+        port = data.get('port', '1')
+        
         return [
-            # Format 1: Direct commands (no interface context)
-            f"gpon ont add {data.get('slot', '0')}/{data.get('port', '1')} {onu_id} sn {data['gpon_sn']}",
-            f"gpon ont desc {data.get('slot', '0')}/{data.get('port', '1')} {onu_id} {onu_desc}",
+            # Format 1: Interface-level direct commands (since we're already in interface mode)
+            f"ont add {onu_id} sn {data['gpon_sn']}",
+            f"ont {onu_id} desc {onu_desc}",
+            f"ont {onu_id} profile {onu_id}",
             
-            # Format 2: ONT-based commands
-            f"ont add {data.get('slot', '0')}/{data.get('port', '1')} {onu_id} sn {data['gpon_sn']}",
-            f"ont {data.get('slot', '0')}/{data.get('port', '1')} {onu_id} description {onu_desc}",
+            # Format 2: Try without ont prefix
+            f"add ont {onu_id} sn {data['gpon_sn']}",
+            f"set ont {onu_id} desc {onu_desc}",
             
-            # Format 3: Service configuration
-            f"service-port {onu_id} vlan {data['vlan_port']} gpon {data.get('slot', '0')}/{data.get('port', '1')} ont {onu_id}",
+            # Format 3: Try create syntax
+            f"create ont {onu_id} sn {data['gpon_sn']} desc {onu_desc}",
             
-            # Format 4: Alternative syntax
-            f"create ont {data.get('slot', '0')}-{data.get('port', '1')}-{onu_id} sn {data['gpon_sn']}",
+            # Format 4: Try configure syntax  
+            f"configure ont {onu_id} sn {data['gpon_sn']}",
+            f"configure ont {onu_id} description {onu_desc}",
+            
+            # Format 5: Try set syntax
+            f"set ont {onu_id} serial-number {data['gpon_sn']}",
+            f"set ont {onu_id} name {onu_desc}",
         ]
     else:
         # Generic/Original commands (keeping current format)
@@ -320,6 +329,45 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
             
             if working_commands:
                 log_callback(f"    📝 Found {len(working_commands)} working commands\n")
+                
+                # Now try specific interface-level commands
+                log_callback(f"[+] Exploring interface-specific commands...\n")
+                interface_commands = [
+                    "?",
+                    "help", 
+                    "ont ?",
+                    "onu ?",
+                    "add ?",
+                    "create ?",
+                    "set ?",
+                    "configure ?",
+                    # Try direct commands without parameters
+                    "ont",
+                    "onu", 
+                    "add",
+                    "create",
+                    "set"
+                ]
+                
+                interface_working = []
+                for int_cmd in interface_commands:
+                    try:
+                        log_callback(f"      Interface cmd: {int_cmd}\n")
+                        int_response = client.exec_cmd(int_cmd, timeout=5.0)
+                        
+                        if int_response and "unknown command" not in int_response.lower():
+                            interface_working.append((int_cmd, int_response))
+                            log_callback(f"      ✅ '{int_cmd}' works in interface mode!\n")
+                            
+                            # Look for parameter hints in response
+                            if "syntax" in int_response.lower() or "usage" in int_response.lower():
+                                log_callback(f"      💡 Found syntax help\n")
+                        else:
+                            log_callback(f"      ❌ '{int_cmd}' failed\n")
+                    except Exception:
+                        continue
+                
+                log_callback(f"    📋 Interface commands working: {len(interface_working)}\n")
             else:
                 log_callback(f"    ❌ No working commands found - OLT may need different approach\n")
         
@@ -330,6 +378,39 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
         log_callback("\n" + "=" * 60 + "\n")
         log_callback(f"INANZA KUTUMA TELNET COMMANDS KWENYE OLT INTERFACE gpon-olt_{slot}/{port}:\n")
         log_callback("=" * 60 + "\n\n")
+
+        # If unknown vendor and few commands, do interactive discovery first
+        if vendor == "unknown" and len(commands) <= 10:
+            log_callback("[+] INTERACTIVE DISCOVERY: Testing interface commands...\n")
+            log_callback("=" * 40 + "\n")
+            
+            # Test help commands in interface mode
+            help_commands = ["?", "help", "ont ?", "onu ?", "add ?", "create ?", "set ?"]
+            
+            for help_cmd in help_commands:
+                try:
+                    log_callback(f"Testing interface help: {help_cmd}\n")
+                    help_response = client.exec_cmd(help_cmd, timeout=5.0)
+                    
+                    if help_response and "unknown command" not in help_response.lower():
+                        log_callback(f"✅ SUCCESS: {help_cmd}\n")
+                        
+                        # Show useful lines from help output
+                        lines = help_response.split('\n')
+                        for line in lines[:10]:  # First 10 lines
+                            line = line.strip()
+                            if line and not line.startswith("DOD-OLT") and "%" not in line:
+                                if any(keyword in line.lower() for keyword in ["ont", "onu", "add", "create", "set", "sn", "serial"]):
+                                    log_callback(f"  💡 {line}\n")
+                        log_callback("\n")
+                    else:
+                        log_callback(f"❌ Failed: {help_cmd}\n")
+                        
+                except Exception as e:
+                    log_callback(f"⚠️ Error: {help_cmd} - {str(e)}\n")
+            
+            log_callback("=" * 40 + "\n")
+            log_callback("Now trying actual configuration commands...\n\n")
 
         total_commands = len(commands)
         for i, cmd in enumerate(commands, 1):
