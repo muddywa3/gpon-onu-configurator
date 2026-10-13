@@ -6,38 +6,91 @@ def detect_olt_vendor(client, log_callback):
     """Detect OLT vendor and return appropriate command set"""
     log_callback("[+] Detecting OLT vendor and model...\n")
     
-    # Try to get system information
-    show_commands = [
+    # Extended list of diagnostic commands for different vendors
+    diagnostic_commands = [
+        # Standard commands
         "show version",
-        "show system",
-        "show device", 
+        "show system", 
+        "show device",
         "display version",
-        "display device"
+        "display device",
+        "show system information",
+        "show chassis",
+        "show hardware",
+        
+        # Huawei specific
+        "display version",
+        "display device",
+        "display board 0",
+        
+        # ZTE specific  
+        "show card",
+        "show equipment",
+        "show system-information",
+        
+        # FiberHome specific
+        "show version brief",
+        "show equipment all",
+        
+        # DASAN/Other
+        "show system info",
+        "show shelf",
+        "show card all",
+        
+        # Generic fallbacks
+        "help",
+        "?",
+        "show ?",
+        "show"
     ]
     
-    for cmd in show_commands:
+    vendor_responses = []
+    
+    for cmd in diagnostic_commands:
         try:
+            log_callback(f"    Trying: {cmd}\n")
             response = client.exec_cmd(cmd, timeout=5.0)
-            response_lower = response.lower()
             
-            if "huawei" in response_lower:
-                log_callback("    Detected: Huawei OLT\n")
-                return "huawei"
-            elif "zte" in response_lower or "zxan" in response_lower:
-                log_callback("    Detected: ZTE OLT\n") 
-                return "zte"
-            elif "fiberhome" in response_lower or "an55" in response_lower:
-                log_callback("    Detected: FiberHome OLT\n")
-                return "fiberhome"
-            elif any(vendor in response_lower for vendor in ["dasan", "v-sol", "vsol"]):
-                log_callback("    Detected: DASAN/V-SOL OLT\n")
-                return "dasan"
+            if response and "unknown command" not in response.lower():
+                log_callback(f"    ✅ Success: {cmd}\n")
+                vendor_responses.append((cmd, response))
                 
-        except Exception:
+                response_lower = response.lower()
+                
+                # Check for vendor indicators
+                if any(hw in response_lower for hw in ["huawei", "ma56", "ma58", "smartax"]):
+                    log_callback("    🎯 Detected: Huawei OLT\n")
+                    return "huawei"
+                elif any(zte in response_lower for zte in ["zte", "zxan", "c300", "c320"]):
+                    log_callback("    🎯 Detected: ZTE OLT\n") 
+                    return "zte"
+                elif any(fh in response_lower for fh in ["fiberhome", "an55", "an56"]):
+                    log_callback("    🎯 Detected: FiberHome OLT\n")
+                    return "fiberhome"
+                elif any(ds in response_lower for ds in ["dasan", "v-sol", "vsol", "zhone"]):
+                    log_callback("    🎯 Detected: DASAN/V-SOL OLT\n")
+                    return "dasan"
+                elif any(alc in response_lower for alc in ["alcatel", "nokia", "isam"]):
+                    log_callback("    🎯 Detected: Nokia/Alcatel OLT\n")
+                    return "nokia"
+            else:
+                log_callback(f"    ❌ Failed: {cmd}\n")
+                
+        except Exception as e:
+            log_callback(f"    ⚠️ Error with {cmd}: {str(e)}\n")
             continue
     
-    log_callback("    ⚠️ Could not detect OLT vendor - using generic commands\n")
-    return "generic"
+    # If we got responses but couldn't identify vendor, analyze content
+    if vendor_responses:
+        log_callback(f"    📋 Got {len(vendor_responses)} successful responses:\n")
+        for cmd, resp in vendor_responses:
+            lines = resp.split('\n')[:3]  # First 3 lines
+            for line in lines:
+                if line.strip():
+                    log_callback(f"      {cmd}: {line.strip()}\n")
+    
+    log_callback("    ❓ Unknown OLT vendor - need manual identification\n")
+    return "unknown"
 
 
 def get_vendor_commands(vendor, data):
@@ -71,6 +124,30 @@ def get_vendor_commands(vendor, data):
             f"onu {onu_id} profile line ZTE-F460 remote ZTE-F460",
             f"pon-onu-mng gpon-onu_{data.get('slot', '0')}/{data.get('port', '1')}:{onu_id}",
             f"service HSI type internet gemport 1 vlan {data['vlan_port']}"
+        ]
+    elif vendor == "nokia":
+        # Nokia/Alcatel ISAM commands
+        return [
+            f"configure equipment ont interface {data.get('slot', '0')}/{data.get('port', '1')}/{onu_id} admin-state enable",
+            f"configure equipment ont interface {data.get('slot', '0')}/{data.get('port', '1')}/{onu_id} desc \"{onu_desc}\"", 
+            f"configure service vpls {data['vlan_port']} sap {data.get('slot', '0')}/{data.get('port', '1')}/{onu_id}:0 create"
+        ]
+    elif vendor == "unknown":
+        # Try multiple command formats for unknown OLT
+        return [
+            # Format 1: Direct commands (no interface context)
+            f"gpon ont add {data.get('slot', '0')}/{data.get('port', '1')} {onu_id} sn {data['gpon_sn']}",
+            f"gpon ont desc {data.get('slot', '0')}/{data.get('port', '1')} {onu_id} {onu_desc}",
+            
+            # Format 2: ONT-based commands
+            f"ont add {data.get('slot', '0')}/{data.get('port', '1')} {onu_id} sn {data['gpon_sn']}",
+            f"ont {data.get('slot', '0')}/{data.get('port', '1')} {onu_id} description {onu_desc}",
+            
+            # Format 3: Service configuration
+            f"service-port {onu_id} vlan {data['vlan_port']} gpon {data.get('slot', '0')}/{data.get('port', '1')} ont {onu_id}",
+            
+            # Format 4: Alternative syntax
+            f"create ont {data.get('slot', '0')}-{data.get('port', '1')}-{onu_id} sn {data['gpon_sn']}",
         ]
     else:
         # Generic/Original commands (keeping current format)
@@ -167,6 +244,51 @@ def execute_gpon_config(data: dict, log_callback, status_callback, done_callback
 
         # 1.7. Detect OLT vendor and get appropriate commands
         vendor = detect_olt_vendor(client, log_callback)
+        
+        # If vendor is unknown, try to discover available commands
+        if vendor == "unknown":
+            log_callback("[+] Exploring available CLI commands...\n")
+            
+            # Try common command patterns to understand the CLI
+            exploration_commands = [
+                "help",
+                "?",
+                "show ?",
+                "gpon ?", 
+                "ont ?",
+                "onu ?",
+                "interface ?",
+                "configure ?",
+                "config ?",
+                "enable",
+                "en"
+            ]
+            
+            working_commands = []
+            for exp_cmd in exploration_commands:
+                try:
+                    log_callback(f"    Exploring: {exp_cmd}\n")
+                    exp_response = client.exec_cmd(exp_cmd, timeout=5.0)
+                    
+                    if exp_response and "unknown command" not in exp_response.lower():
+                        working_commands.append((exp_cmd, exp_response))
+                        log_callback(f"    ✅ '{exp_cmd}' works!\n")
+                        
+                        # Look for hints about command structure
+                        if "gpon" in exp_response.lower():
+                            log_callback(f"    💡 Found GPON commands in response\n")
+                        if "ont" in exp_response.lower():
+                            log_callback(f"    💡 Found ONT commands in response\n")
+                        if "interface" in exp_response.lower():
+                            log_callback(f"    💡 Found interface commands in response\n")
+                    
+                except Exception:
+                    continue
+            
+            if working_commands:
+                log_callback(f"    📝 Found {len(working_commands)} working commands\n")
+            else:
+                log_callback(f"    ❌ No working commands found - OLT may need different approach\n")
         
         # 2. Build commands based on vendor
         commands = get_vendor_commands(vendor, data)

@@ -139,10 +139,15 @@ class GPONConfigurator(tk.Tk):
         self._field(g, "olt_username", "Username *", 0, 1, default="admin")
         self._field(g, "olt_password", "Password *", 1, 0, show="•")
         
-        # Add Test Mode checkbox
+        # Test Mode checkbox  
         test_frame = ttk.Frame(g, style="Card.TFrame")
         test_frame.grid(row=2, column=0, columnspan=4, sticky="w", pady=(10, 0))
         self._checkbox(test_frame, "test_mode", "Test Mode (Messagebox tu, haitaunganisha OLT ya kweli)", 0, 0, default=False)
+        
+        # OLT Discovery Mode checkbox
+        discovery_frame = ttk.Frame(g, style="Card.TFrame") 
+        discovery_frame.grid(row=3, column=0, columnspan=4, sticky="w", pady=(5, 0))
+        self._checkbox(discovery_frame, "discovery_mode", "Discovery Mode (Explore OLT commands before execution)", 0, 0, default=False)
 
     def _section_position(self):
         g = self._card("ONU Position")
@@ -310,6 +315,11 @@ class GPONConfigurator(tk.Tk):
             self._show_test_mode_result(data)
             return
         
+        # Check if Discovery Mode is enabled  
+        if data.get("discovery_mode", False):
+            self._show_discovery_mode_result(data)
+            return
+        
         self.btn_submit.config(state="disabled")
         self._set_status("Inaconfigure ONU kwenye OLT...", COLORS["primary"])
         self._log("", clear=True)
@@ -323,7 +333,71 @@ class GPONConfigurator(tk.Tk):
             daemon=True
         ).start()
 
-    def _show_test_mode_result(self, data):
+    def _show_discovery_mode_result(self, data):
+        """Discovery mode - connect to OLT and explore available commands"""
+        self.btn_submit.config(state="disabled")
+        self._set_status("Discovery Mode: Exploring OLT commands...", COLORS["primary"])
+        self._log("", clear=True)
+        
+        def discovery_task():
+            from olt_telnet import OLTTelnetClient
+            
+            client = OLTTelnetClient(host=data["olt_ip"], port=23)
+            try:
+                # Connect and login
+                self._log(f"[DISCOVERY] Connecting to {data['olt_ip']}...\n")
+                client.login(data["olt_username"], data["olt_password"], self._log)
+                
+                # Run discovery commands
+                discovery_commands = [
+                    "show version", "show system", "show device", "display version",
+                    "help", "?", "show ?", "gpon ?", "ont ?", "onu ?", 
+                    "interface ?", "configure ?", "config ?", "enable"
+                ]
+                
+                self._log("\n" + "=" * 50 + "\n")
+                self._log("DISCOVERY MODE: Exploring Available Commands\n")
+                self._log("=" * 50 + "\n\n")
+                
+                working_commands = []
+                
+                for cmd in discovery_commands:
+                    try:
+                        self._log(f"Testing: {cmd}\n")
+                        response = client.exec_cmd(cmd, timeout=5.0)
+                        
+                        if response and "unknown command" not in response.lower():
+                            working_commands.append(cmd)
+                            self._log(f"  ✅ SUCCESS\n")
+                            
+                            # Show first few lines of response
+                            lines = response.split('\n')[:3]
+                            for line in lines:
+                                if line.strip():
+                                    self._log(f"    {line.strip()}\n")
+                            self._log("\n")
+                        else:
+                            self._log(f"  ❌ FAILED\n\n")
+                            
+                    except Exception as e:
+                        self._log(f"  ⚠️ ERROR: {str(e)}\n\n")
+                
+                self._log("=" * 50 + "\n")
+                self._log(f"DISCOVERY COMPLETE!\n")
+                self._log(f"Working commands: {len(working_commands)}\n")
+                self._log(f"Commands: {', '.join(working_commands)}\n")
+                self._log("=" * 50 + "\n")
+                
+                self._set_status(f"Discovery complete: {len(working_commands)} working commands found", COLORS["success"])
+                
+            except Exception as e:
+                self._log(f"❌ Discovery Error: {str(e)}\n")
+                self._set_status("Discovery failed", COLORS["error"])
+            finally:
+                client.close()
+                self.after(0, lambda: self.btn_submit.config(state="normal"))
+        
+        threading.Thread(target=discovery_task, daemon=True).start()
         """Show the generated commands in a messagebox for test mode"""
         try:
             commands = build_gpon_commands(data)
