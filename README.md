@@ -42,7 +42,7 @@ A Python-based GUI application for configuring GPON ONUs (Optical Network Units)
 ### Option 2: Run from Source
 ```bash
 # Clone the repository
-git clone https://github.com/mudddywa3/gpon-onu-configurator.git
+git clone https://github.com/muddywa3/gpon-onu-configurator.git
 cd gpon-onu-configurator
 
 # Run the application
