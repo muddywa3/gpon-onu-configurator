@@ -35,12 +35,14 @@ def build_gpon_commands(data: dict) -> list[str]:
 
     # Wi-Fi configuration commands
     if data.get("enable_ssid1"):
+        # SSID1 = 2.4GHz WiFi (normal name)
         commands.append(
-            f"onu {onu_id} pri wifi_ssid 1 hide disable auth_mode wpa2psk_wpa3psk encrypt_type aes shared_key {data['wifi_shared_key']} rekey_interval 0 name {wifi_name} 5G"
+            f"onu {onu_id} pri wifi_ssid 1 hide disable auth_mode wpa2psk_wpa3psk encrypt_type aes shared_key {data['wifi_shared_key']} rekey_interval 0 name {wifi_name}"
         )
     if data.get("enable_ssid5"):
+        # SSID5 = 5GHz WiFi (name with _5G suffix)
         commands.append(
-            f"onu {onu_id} pri wifi_ssid 5 hide disable auth_mode wpa2psk_wpa3psk encrypt_type aes shared_key {data['wifi_shared_key']} rekey_interval 0 name {wifi_name}"
+            f"onu {onu_id} pri wifi_ssid 5 hide disable auth_mode wpa2psk_wpa3psk encrypt_type aes shared_key {data['wifi_shared_key']} rekey_interval 0 name {wifi_name}_5G"
         )
 
     return commands

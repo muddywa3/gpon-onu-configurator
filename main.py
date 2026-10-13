@@ -165,8 +165,8 @@ class GPONConfigurator(tk.Tk):
     def _section_wifi(self):
         g = self._card("WiFi")
         ttk.Label(g, text="SSID", style="Sub.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
-        self._checkbox(g, "enable_ssid1", "SSID 2.4GHz", 1, 0, default=True)
-        self._checkbox(g, "enable_ssid5", "SSID 5GHz", 1, 1, default=True)
+        self._checkbox(g, "enable_ssid1", "SSID 2.4GHz (normal name)", 1, 0, default=True)
+        self._checkbox(g, "enable_ssid5", "SSID 5GHz (name + _5G)", 1, 1, default=True)
 
         ttk.Label(g, text="LAN Port Binding", style="Sub.TLabel").grid(row=2, column=0, columnspan=4, sticky="w", pady=(14, 4))
         lan_row = ttk.Frame(g, style="Card.TFrame")
@@ -175,7 +175,7 @@ class GPONConfigurator(tk.Tk):
             self._checkbox(lan_row, f"lan{i}", f"LAN{i}", 0, i - 1, default=True)
 
         ttk.Label(g, text="WiFi Credentials", style="Sub.TLabel").grid(row=4, column=0, columnspan=4, sticky="w", pady=(14, 4))
-        self._field(g, "wifi_username", "WiFi SSID Name", 5, 0, default="kinuju")
+        self._field(g, "wifi_username", "WiFi SSID Name", 5, 0, default="kinuju", hint="2.4GHz: [name], 5GHz: [name]_5G")
         self._field(g, "wifi_shared_key", "WiFi Shared Key *", 5, 1, show="•", default="kwandu1978")
 
     def _log(self, text, clear=False):

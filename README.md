@@ -17,7 +17,10 @@ A Python-based GUI application for configuring GPON ONUs (Optical Network Units)
   - ONU positioning (Slot, Port, ID)
   - PPPoE authentication
   - VLAN configuration  
-  - WiFi settings (2.4GHz & 5GHz)
+  - WiFi settings (2.4GHz & 5GHz with automatic naming)
+    - 2.4GHz SSID: Uses the WiFi name as entered
+    - 5GHz SSID: Automatically adds "_5G" suffix
+    - Example: "home" → 2.4GHz: "home", 5GHz: "home_5G"
   - LAN port bindings
 
 ## 📋 Requirements
